@@ -9,10 +9,28 @@ import "net/http"
 
 type Coordinator struct {
 	// Your definitions here.
-
+	InputFiles []string // list of input files
+ 	NReduce     int      // number of reduce tasks
 }
 
 // Your code here -- RPC handlers for the worker to call.
+func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply) error {
+	// For now, let's keep it simple. We'll just give out the first Map task.
+	// In the real version, you'll have logic here to find an available task.
+
+	// Let's log that a worker asked for a task.
+	log.Println("Coordinator: Received a task request from a worker.")
+
+	// Fill in the reply structure with the details of the first Map task.
+	reply.TaskType = "Map"
+	reply.TaskNumber = 1 // Let's say it's task #1
+	reply.NReduce = c.NReduce
+	reply.FileName = c.InputFiles[0] // Give it the first file
+
+	log.Printf("Coordinator: Assigning Map task #%d with file %s\n", reply.TaskNumber, reply.FileName)
+
+	return nil // A nil error means the RPC call was successful.	
+}
 
 //
 // an example RPC handler.
@@ -63,7 +81,9 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
 	// Your code here.
-
+	c.InputFiles = files
+ 	c.NReduce = nReduce
+	log.Printf("Coordinator: Created with %d input files and %d reduce tasks.\n", len(files), nReduce)
 
 	c.server()
 	return &c

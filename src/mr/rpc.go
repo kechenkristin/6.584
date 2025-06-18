@@ -23,6 +23,18 @@ type ExampleReply struct {
 }
 
 // Add your RPC definitions here.
+// RequestTaskArgs is what the worker sends to ask for a task.
+// It can be empty because the act of calling the function is the request.
+type RequestTaskArgs struct {
+}
+
+type RequestTaskReply struct {
+ TaskType string // "Map" or "Reduce"
+ TaskNumber int // the task number, starting at 0
+ FileName string // the name of the file to process (for Map tasks)
+ NReduce int // the number of reduce tasks (for Map tasks)
+ }
+
 
 
 // Cook up a unique-ish UNIX-domain socket name

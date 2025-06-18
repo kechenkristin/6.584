@@ -32,10 +32,36 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	// Your worker implementation here.
+	fmt.Println("Worker started...")
 
 	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
+	RequestExample()
 
+}
+
+func RequestExample() {
+
+	// Create the arguments for our RPC call. It's empty.
+	args := RequestTaskArgs{}
+
+	// Create a reply variable to hold the response from the coordinator.
+	reply := RequestTaskReply{}
+
+	// Make the RPC call to the coordinator.
+	// The first argument is the name of the RPC method we want to call.
+	// It's formatted as "Coordinator.MethodName".
+	ok := call("Coordinator.RequestTask", &args, &reply)
+
+	// Check if the call was successful.
+	if ok {
+		// If the call was successful, the coordinator's reply is in our `reply` variable.
+		// Let's print it out to see what we got!
+		fmt.Printf("Worker received a reply: %+v\n", reply)
+	} else {
+		// If the call fails, it probably means the coordinator has exited.
+		// We should probably exit too.
+		fmt.Println("Call to coordinator failed. Worker exiting.")
+	}
 }
 
 //

@@ -35,6 +35,20 @@ type RequestTaskReply struct {
  NReduce int // the number of reduce tasks (for Map tasks)
  }
 
+ // Add your RPC definitions here.
+
+// ... (keep the other structs: RequestTaskArgs, RequestTaskReply)
+
+// ReportTaskDoneArgs is what the worker sends to report a completed task.
+type ReportTaskDoneArgs struct {
+	TaskType   string
+	TaskNumber int
+}
+
+// ReportTaskDoneReply is the coordinator's empty reply.
+type ReportTaskDoneReply struct {
+}
+
 
 
 // Cook up a unique-ish UNIX-domain socket name

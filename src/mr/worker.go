@@ -4,6 +4,10 @@ import "fmt"
 import "log"
 import "net/rpc"
 import "hash/fnv"
+import "time"
+import "os"
+import "io/ioutil"
+import "encoding/json"
 
 
 //
@@ -35,8 +39,123 @@ func Worker(mapf func(string, string) []KeyValue,
 	fmt.Println("Worker started...")
 
 	// uncomment to send the Example RPC to the coordinator.
-	RequestExample()
+	// RequestExample()
 
+	log.Printf("Worker: Asking for a task...")
+	// Worker listens for tasks from the coordinator.
+	for {
+		// Asks the coordinator for a task.
+		// Create the arguments for our RPC call. It's empty.
+		args := RequestTaskArgs{}
+
+		// Create a reply variable to hold the response from the coordinator.
+		reply := RequestTaskReply{}
+		ok := call("Coordinator.RequestTask", &args, &reply)
+		if !ok {
+			fmt.Println("Worker: Coordinator is not available. Exiting.")
+			return // Exit if the coordinator is not available.
+		}
+
+		// Check the type of task received.
+		switch reply.TaskType {
+			case "Map":
+			// Handle Map task.
+			fmt.Printf("Worker: Received Map task #%d for file %s\n", reply.TaskNumber, reply.FileName)
+			performMapTask(reply.FileName, reply.TaskNumber, reply.NReduce, mapf)
+			reportTaskDone("Map", reply.TaskNumber)
+			case "Reduce":
+				// We will implement this in a future step.
+				fmt.Printf("Worker received Reduce task #%d\n", reply.TaskNumber)
+			case "Wait":
+				// The coordinator told us to wait.
+				fmt.Println("No tasks available. Worker will wait and retry.")
+				time.Sleep(1 * time.Second)
+			case "Exit":
+				// The coordinator told us the job is done.
+				fmt.Println("Job is complete. Worker exiting.")
+				return // Exit the Worker function, terminating the process.
+			default:
+				fmt.Printf("Received unknown task type: %s\n", reply.TaskType)
+			}
+ 		}
+
+ 	}
+
+
+
+// performMapTask executes a single Map task.
+func performMapTask(filename string, taskNumber int, nReduce int, mapf func(string, string) []KeyValue) {
+	// 1. Read the input file.
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatalf("Worker: Failed to open file %s: %v", filename, err)
+		return
+	}
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("Worker: Failed to read file %s: %v", filename, err)
+	}
+	file.Close()
+
+	// 2. Call mapf to perform the map operation.
+	//    THIS IS THE CRITICAL FIX!
+	//    We pass the content of the file to the map function, which returns
+	//    a slice of key-value pairs.
+	kva := mapf(filename, string(content))
+
+	// 3. Create nReduce temporary files and corresponding JSON encoders.
+	//    We will write the intermediate key-value pairs to these files.
+	encoders := make([]*json.Encoder, nReduce)
+	tempFiles := make([]*os.File, nReduce)
+	for i := 0; i < nReduce; i++ {
+		// Create a temporary file. It will be renamed later.
+		tempFile, err := ioutil.TempFile("", "mr-map-temp-")
+		if err != nil {
+			log.Fatalf("Worker: Cannot create temporary file: %v", err)
+		}
+		tempFiles[i] = tempFile
+		encoders[i] = json.NewEncoder(tempFile)
+	}
+
+	// 4. Distribute the key-value pairs from mapf into the nReduce buckets.
+	for _, kv := range kva {
+		// Use the ihash function to decide which bucket this key belongs to.
+		reduceTaskNumber := ihash(kv.Key) % nReduce
+		// Write the KeyValue pair to the correct temporary file.
+		err := encoders[reduceTaskNumber].Encode(&kv)
+		if err != nil {
+			log.Fatalf("Worker: Cannot write to intermediate file: %v", err)
+		}
+	}
+
+	// 5. Atomically rename the temporary files to their final intermediate names.
+	//    This ensures that no other process sees a partially written file.
+	for i := 0; i < nReduce; i++ {
+		// First, close the file to make sure all data is written to disk.
+		tempFiles[i].Close()
+		tempName := tempFiles[i].Name()
+		// The final name convention is mr-X-Y.
+		finalName := fmt.Sprintf("mr-%d-%d", taskNumber, i)
+		err := os.Rename(tempName, finalName)
+		if err != nil {
+			log.Fatalf("Worker: Cannot rename file %s to %s: %v", tempName, finalName, err)
+		}
+	}
+
+	log.Printf("Worker: Finished Map task #%d.", taskNumber)
+}
+
+// Helper function to report that a task is done.
+func reportTaskDone(taskType string, taskNumber int) {
+	args := ReportTaskDoneArgs{
+		TaskType:   taskType,
+		TaskNumber: taskNumber,
+	}
+	reply := ReportTaskDoneReply{}
+	ok := call("Coordinator.ReportTaskDone", &args, &reply)
+	if !ok {
+		fmt.Println("Failed to report task done. Coordinator may have exited.")
+	}
 }
 
 func RequestExample() {

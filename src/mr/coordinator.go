@@ -99,6 +99,8 @@ func (c *Coordinator) RequestTask(args *RequestTaskArgs, reply *RequestTaskReply
 	
 					// 4. The conversation is over. The Boss hands the work order to the worker
 					//    and sends them on their way.
+					reply.NReduce = c.NReduce // Number of Reduce tasks
+					reply.NMap = len(c.MapTasks) // Number of Map tasks for Reduce workers
 					return nil
 				}
 			}

@@ -8,15 +8,29 @@ import "time"
 import "os"
 import "io/ioutil"
 import "encoding/json"
+import "sort"
 
 
-//
 // Map functions return a slice of KeyValue.
 //
 type KeyValue struct {
 	Key   string
 	Value string
 }
+
+// ByKey defines a type for sorting a slice of KeyValue structs by their key.
+type ByKey []KeyValue
+
+// Len, Swap, and Less are the three methods needed to implement sort.Interface.
+// By implementing this interface, we can use Go's generic sort.Sort function.
+
+// Len returns the number of items in the slice.
+func (a ByKey) Len() int           { return len(a) }
+// Swap swaps the items at positions i and j.
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+// Less returns true if the item at i should come before the item at j.
+// We are sorting alphabetically by key.
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 //
 // use ihash(key) % NReduce to choose the reduce
@@ -60,12 +74,14 @@ func Worker(mapf func(string, string) []KeyValue,
 		switch reply.TaskType {
 			case "Map":
 			// Handle Map task.
-			fmt.Printf("Worker: Received Map task #%d for file %s\n", reply.TaskNumber, reply.FileName)
-			performMapTask(reply.FileName, reply.TaskNumber, reply.NReduce, mapf)
-			reportTaskDone("Map", reply.TaskNumber)
+				log.Printf("Worker: Received Map task #%d for file %s\n", reply.TaskNumber, reply.FileName)
+				performMapTask(reply.FileName, reply.TaskNumber, reply.NReduce, mapf)
+				reportTaskDone("Map", reply.TaskNumber)
 			case "Reduce":
 				// We will implement this in a future step.
-				fmt.Printf("Worker received Reduce task #%d\n", reply.TaskNumber)
+				log.Printf("Worker received Reduce task #%d\n", reply.TaskNumber)
+				performReduceTask(reply.TaskNumber, reply.NMap, reducef)
+				reportTaskDone("Reduce", reply.TaskNumber)				
 			case "Wait":
 				// The coordinator told us to wait.
 				fmt.Println("No tasks available. Worker will wait and retry.")
@@ -143,6 +159,89 @@ func performMapTask(filename string, taskNumber int, nReduce int, mapf func(stri
 	}
 
 	log.Printf("Worker: Finished Map task #%d.", taskNumber)
+}
+
+func performReduceTask(reduceTaskNumber int, numMapTasks int, reducef func(string, []string) string) {
+	// This will be inside our performReduceTask function
+
+	// We need to know how many Map tasks there were to know which files to read.
+	// The Coordinator should provide this. Let's assume we get it.
+	// (For this lab, the number of map tasks is the number of input files.)
+	intermediate := []KeyValue{}
+
+	// Loop from map task 0 to the last map task.
+	for i := 0; i < numMapTasks; i++ {
+		// Construct the intermediate filename for this map task and our reduce task.
+		filename := fmt.Sprintf("mr-%d-%d", i, reduceTaskNumber)
+
+		// Open the file.
+		file, err := os.Open(filename)
+		if err != nil {
+			// It's possible a map task produced no keys for this reduce task,
+			// so the file might not exist. We can safely ignore this error.
+			continue
+		}
+
+		// Use a JSON decoder to read the KeyValue pairs from the file.
+		dec := json.NewDecoder(file)
+		for {
+			var kv KeyValue
+			if err := dec.Decode(&kv); err != nil {
+				break // We've reached the end of the file.
+			}
+			intermediate = append(intermediate, kv)
+		}
+		file.Close()
+	}
+
+	// This is the next part of our performReduceTask function
+
+	// Sort the intermediate data by key.
+	sort.Sort(ByKey(intermediate))
+
+	// We will write our final output to a temporary file first.
+	tempFile, _ := ioutil.TempFile("", "mr-reduce-temp-")
+
+	// This loop is the core of the reduce processing.
+	// It iterates over the sorted intermediate data, one group of identical keys at a time.
+	i := 0
+	for i < len(intermediate) {
+		// Find the end of the current group of keys.
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+
+		// We've found a group! The key is intermediate[i].Key.
+		// The values are in intermediate[i] through intermediate[j-1].
+		// Collect all the values for this key into a slice of strings.
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+
+		// Call the user's Reduce function to get the final result.
+		output := reducef(intermediate[i].Key, values)
+
+		// Write the result to our temporary output file.
+		fmt.Fprintf(tempFile, "%v %v\n", intermediate[i].Key, output)
+
+		// Move to the beginning of the next group.
+		i = j
+	}
+
+	// This is the very end of our performReduceTask function
+
+	// Close the temporary file to ensure all data is written to disk.
+	tempFile.Close()
+
+	// The final output file name.
+	finalName := fmt.Sprintf("mr-out-%d", reduceTaskNumber)
+
+	// Atomically rename the temporary file to its final name.
+	os.Rename(tempFile.Name(), finalName)
+	log.Printf("Worker: Finished Reduce task #%d.", reduceTaskNumber)
+
 }
 
 // Helper function to report that a task is done.

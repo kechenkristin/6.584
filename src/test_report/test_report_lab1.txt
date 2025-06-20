@@ -1,0 +1,267 @@
+*** Cannot find timeout command; proceeding without timeouts.
+*** Starting wc test.
+Worker started...
+Worker started...
+Worker started...
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+Job is complete. Worker exiting.
+Job is complete. Worker exiting.
+Job is complete. Worker exiting.
+--- wc test: PASS
+*** Starting indexer test.
+Worker started...
+Worker started...
+No tasks available. Worker will wait and retry.
+Job is complete. Worker exiting.
+Job is complete. Worker exiting.
+--- indexer test: PASS
+*** Starting map parallelism test.
+Worker started...
+Worker started...
+Job is complete. Worker exiting.
+Job is complete. Worker exiting.
+--- map parallelism test: PASS
+*** Starting reduce parallelism test.
+Worker started...
+Worker started...
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+Job is complete. Worker exiting.
+--- reduce parallelism test: PASS
+Job is complete. Worker exiting.
+*** Starting job count test.
+Worker started...
+Worker started...
+No tasks available. Worker will wait and retry.
+Job is complete. Worker exiting.
+Worker started...
+Worker started...
+Job is complete. Worker exiting.
+Job is complete. Worker exiting.
+--- job count test: PASS
+Job is complete. Worker exiting.
+*** Starting early exit test.
+Worker started...
+Worker started...
+Worker started...
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+Job is complete. Worker exiting.
+Job is complete. Worker exiting.
+Job is complete. Worker exiting.
+--- early exit test: PASS
+*** Starting crash test.
+Worker started...
+Worker started...
+Worker started...
+Worker started...
+Worker started...
+Worker started...
+Worker started...
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+Worker started...
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+Worker started...
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+Worker started...
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+No tasks available. Worker will wait and retry.
+Job is complete. Worker exiting.
+Job is complete. Worker exiting.
+Job is complete. Worker exiting.
+Worker started...
+Job is complete. Worker exiting.
+Worker started...
+Job is complete. Worker exiting.
+--- crash test: PASS
+*** PASSED ALL TESTS

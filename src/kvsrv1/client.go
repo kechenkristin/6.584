@@ -1,11 +1,12 @@
 package kvsrv
 
 import (
+	"time"
+
 	"6.5840/kvsrv1/rpc"
 	"6.5840/kvtest1"
 	"6.5840/tester1"
 )
-
 
 type Clerk struct {
 	clnt   *tester.Clnt
@@ -30,7 +31,19 @@ func MakeClerk(clnt *tester.Clnt, server string) kvtest.IKVClerk {
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	// You will have to modify this function.
-	return "", 0, rpc.ErrNoKey
+	getArgs := &rpc.GetArgs{Key: key}
+	for {
+		var getReply rpc.GetReply
+		if ok := ck.clnt.Call(ck.server, "KVServer.Get", getArgs, &getReply); ok {
+			if getReply.Err == rpc.OK {
+				return getReply.Value, getReply.Version, getReply.Err
+			} else if getReply.Err == rpc.ErrNoKey {
+				return "", 0, getReply.Err
+			}
+		}
+		time.Sleep(100 * time.Millisecond) // 等待100ms再重试
+		// 如果是其他错误，继续重试
+	}
 }
 
 // Put updates key with value only if the version in the
@@ -52,5 +65,23 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 // arguments. Additionally, reply must be passed as a pointer.
 func (ck *Clerk) Put(key, value string, version rpc.Tversion) rpc.Err {
 	// You will have to modify this function.
-	return rpc.ErrNoKey
+	putArgs := &rpc.PutArgs{Key: key, Value: value, Version: version}
+	firstAttempt := true
+	var putReply rpc.PutReply
+	for {
+		if ok := ck.clnt.Call(ck.server, "KVServer.Put", putArgs, &putReply); ok {
+			if putReply.Err == rpc.ErrVersion {
+				if firstAttempt {
+					// 如果是第一次尝试调用收到 ErrVersion，直接返回 ErrVersion
+					return rpc.ErrVersion
+				} else {
+					// 如果是重试阶段收到 ErrVersion，返回 ErrMaybe
+					return rpc.ErrMaybe
+				}
+			}
+			return putReply.Err
+		}
+		firstAttempt = false               // 之后都是重试阶段
+		time.Sleep(100 * time.Millisecond) // 等待100ms再重试
+	}
 }

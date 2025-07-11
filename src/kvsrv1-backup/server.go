@@ -32,7 +32,7 @@ type Operation struct {
 }
 
 type KVServer struct {
-	kvStore  map[string]struct {
+	kvStore map[string]struct {
 		Value   string
 		Version rpc.Tversion
 	}

@@ -7,13 +7,13 @@ package raft
 // Make() creates a new raft peer that implements the raft interface.
 
 import (
-	//	"bytes"
+	"bytes"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	//	"6.5840/labgob"
+	"6.5840/labgob"
 	"6.5840/labrpc"
 	"6.5840/raftapi"
 	"6.5840/tester1"
@@ -86,10 +86,10 @@ type RequestVoteReply struct {
 }
 
 type AppendEntriesArgs struct {
-	Term         int        // leader's term
-	LeaderId     int        // so follower can redirect clients
-	PrevLogIndex int        // index of log entry immediately preceding new ones
-	PrevLogTerm  int        // term of prevLogIndex entry
+	Term         int // leader's term
+	LeaderId     int // so follower can redirect clients
+	PrevLogIndex int // index of log entry immediately preceding new ones
+	PrevLogTerm  int // term of prevLogIndex entry
 	LeaderCommit int
 	Entries      []LogEntry // log entries to store (empty for heartbeat; may send
 }
@@ -97,6 +97,8 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int  // currentTerm, for leader to update itself
 	Success bool // true if follower contained entry matching
+	XTerm   int  // Term of the conflicting entry
+	XIndex  int  // Index of first entry with that term
 }
 
 // return currentTerm and whether this server
@@ -127,32 +129,39 @@ func (rf *Raft) GetState() (int, bool) {
 func (rf *Raft) persist() {
 	// Your code here (3C).
 	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// raftstate := w.Bytes()
-	// rf.persister.Save(raftstate, nil)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	raftstate := w.Bytes()
+	rf.persister.Save(raftstate, nil)
 }
 
-// restore previously persisted state.
 func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
+	if data == nil || len(data) < 1 {
 		return
 	}
-	// Your code here (3C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+
+	var currentTerm int
+	var votedFor int
+	var log []LogEntry
+
+	// Decode all three fields in the same order they were encoded.
+	if d.Decode(&currentTerm) != nil ||
+		d.Decode(&votedFor) != nil ||
+		d.Decode(&log) != nil {
+		// An error here means the persisted data is corrupted.
+		// For this lab, you can likely ignore it or log an error.
+	} else {
+		// If decoding is successful, update the Raft state.
+		rf.currentTerm = currentTerm
+		rf.votedFor = votedFor
+		rf.log = log
+	}
 }
 
 // how many bytes in Raft's persisted log?
@@ -186,15 +195,17 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// 2. If we see a newer term, update ourselves and become a follower.
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
+		rf.persist()
 		rf.state = Follower
 		rf.votedFor = -1
+		rf.persist() // Persist the new term and state
 	}
 	reply.Term = rf.currentTerm
 
 	// 👇 This is the new up-to-date check.
 	voterLastLogIndex := len(rf.log) - 1
 	voterLastLogTerm := rf.log[voterLastLogIndex].Term
-	
+
 	upToDate := false
 	if args.LastLogTerm > voterLastLogTerm {
 		upToDate = true
@@ -207,6 +218,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && upToDate {
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateId
+		rf.persist() // Persist the vote
 		rf.lastContact = time.Now()
 	} else {
 		reply.VoteGranted = false
@@ -335,7 +347,9 @@ func (rf *Raft) startElection() {
 
 	// Increment term and change state to Candidate
 	rf.currentTerm++
+	rf.persist() // Persist the new term and vote
 	rf.votedFor = rf.me
+	rf.persist() // Persist the new term and vote
 	rf.state = Candidate
 	rf.lastContact = time.Now()
 	rf.votesReceived = 1 // We vote for ourselves
@@ -384,8 +398,10 @@ func (rf *Raft) handleVoteReply(args *RequestVoteArgs, reply *RequestVoteReply) 
 		rf.state = Follower
 		// update your currentTerm
 		rf.currentTerm = reply.Term
+		rf.persist() // Persist the new term and state
 		// Reset votedFor to "null" (-1)
 		rf.votedFor = -1
+		rf.persist() // Persist the new term and state
 		return
 	}
 	if reply.VoteGranted {
@@ -421,32 +437,47 @@ func (rf *Raft) handleAppendEntriesReply(server int, args *AppendEntriesArgs, re
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	// Ignore stale replies if our state has changed since we sent the RPC.
 	if rf.state != Leader || rf.currentTerm != args.Term {
 		return
 	}
 
-	// Handle successful vs. failed replies.
 	if reply.Success {
-		// Follower's log now matches ours up to this new index.
+		// ... (This part of your code is correct)
 		rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
 		rf.nextIndex[server] = rf.matchIndex[server] + 1
-
-		// 👇 This is the correct logic for advancing the commit index.
 		rf.updateLeaderCommitIndex()
 
 	} else {
-		// If the follower rejected the entry because of a log mismatch,
-		// or if it had a higher term.
+		// Handle failed AppendEntries
 		if reply.Term > rf.currentTerm {
-			// The follower has a higher term; we must step down.
+			// Step down if we find a peer with a higher term
 			rf.currentTerm = reply.Term
+			rf.persist()
 			rf.state = Follower
 			rf.votedFor = -1
-			rf.persist()
+			rf.persist() // Persist the new term and vote
 		} else {
-			// Log inconsistency; decrement nextIndex and retry later.
-			rf.nextIndex[server]--
+			// This is the log reconciliation optimization
+
+			// Search backwards for the last log entry with the follower's conflicting term.
+			lastLogIndexWithXTerm := -1
+			for i := len(rf.log) - 1; i >= 0; i-- {
+				if rf.log[i].Term == reply.XTerm {
+					lastLogIndexWithXTerm = i
+					break
+				}
+			}
+
+			if lastLogIndexWithXTerm != -1 {
+				// Case 1: Leader has the conflicting term. Set nextIndex to be
+				// one past the leader's last entry for that term.
+				rf.nextIndex[server] = lastLogIndexWithXTerm + 1
+			} else {
+				// Case 2: Leader does not have the conflicting term.
+				// Set nextIndex to the first index of that term on the follower.
+				// (The follower has already provided this in reply.XIndex)
+				rf.nextIndex[server] = reply.XIndex
+			}
 		}
 	}
 }
@@ -496,6 +527,11 @@ func (rf *Raft) leaderLoop() {
 			// Determine which entries to send (if any).
 			nextIdx := rf.nextIndex[i]
 			prevLogIndex := nextIdx - 1
+			if prevLogIndex < 0 {
+				// Handle this edge case, perhaps by sending a snapshot later.
+				// For now, you might just skip this peer for this round.
+				continue
+			}
 			prevLogTerm := rf.log[prevLogIndex].Term
 			var entriesToSend []LogEntry
 
@@ -539,27 +575,45 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
-	// If we receive a request with a newer or equal term, we accept
-	// the sender as the valid leader.
+	// ... (Term handling and state updates as before) ...
 	if args.Term > rf.currentTerm {
 		rf.currentTerm = args.Term
+		rf.persist()
 		rf.votedFor = -1
+		rf.persist() // Persist the new term and vote
 	}
 	rf.state = Follower
 	rf.lastContact = time.Now()
 	reply.Term = rf.currentTerm
 
-	// Rule #2: Reply false if our log doesn't contain an entry at
-	// prevLogIndex whose term matches prevLogTerm.
-	if args.PrevLogIndex >= len(rf.log) || rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+	// Rule #2: Log Consistency Check
+	if args.PrevLogIndex >= len(rf.log) {
+		// Case 1: Follower's log is too short.
+		reply.XTerm = -1           // No conflicting term
+		reply.XIndex = len(rf.log) // Tell leader our actual log length
 		reply.Success = false
 		return
 	}
 
+	if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		// Case 2: Term mismatch at PrevLogIndex.
+		conflictingTerm := rf.log[args.PrevLogIndex].Term
+		reply.XTerm = conflictingTerm
+
+		// Search backwards for the first index of the conflicting term.
+		firstIndexOfTerm := args.PrevLogIndex
+		for firstIndexOfTerm > 0 && rf.log[firstIndexOfTerm-1].Term == conflictingTerm {
+			firstIndexOfTerm--
+		}
+		reply.XIndex = firstIndexOfTerm
+		reply.Success = false
+		return
+	}
 	// Rule #3 & #4: Handle conflicting entries and append new ones.
 	// This simple "truncate and append" approach is a common and effective
 	// way to implement this logic.
 	rf.log = rf.log[:args.PrevLogIndex+1]
+	rf.persist() // Persist after modifying the log
 	rf.log = append(rf.log, args.Entries...)
 	rf.persist() // Persist after modifying the log
 
@@ -584,17 +638,24 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *tester.Persister, applyCh chan raftapi.ApplyMsg) raftapi.Raft {
 	rf := &Raft{}
+	// ... (initial assignments)
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
 
-	// Your initialization code here (3A, 3B, 3C).
+	rf.state = Follower
+	rf.votedFor = -1
+	rf.lastContact = time.Now()
+	rf.electionTimeout = time.Duration(150+rand.Intn(150)) * time.Millisecond
 
-	// initialize from state persisted before a crash
+	// Initialize from persisted state
 	rf.readPersist(persister.ReadRaftState())
 
-	// 3B
-	rf.log = []LogEntry{{Term: 0}}
+	// If the log is empty after reading from persister (i.e., this is
+	// a new server), then create the dummy log entry.
+	if len(rf.log) == 0 {
+		rf.log = []LogEntry{{Term: 0}}
+	}
 
 	// start ticker goroutine to start elections
 	go rf.ticker()

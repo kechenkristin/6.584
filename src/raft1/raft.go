@@ -16,7 +16,7 @@ import (
 	"6.5840/labgob"
 	"6.5840/labrpc"
 	"6.5840/raftapi"
-	"6.5840/tester1"
+	tester "6.5840/tester1"
 	"github.com/lvyahui8/goenum"
 )
 
@@ -63,6 +63,7 @@ type Raft struct {
 
 	state           State         // current state of the server (Follower, Candidate, Leader)
 	electionTimeout time.Duration // timeout for elections
+	applyCh         chan raftapi.ApplyMsg
 
 	lastContact   time.Time
 	votesReceived int
@@ -139,7 +140,7 @@ func (rf *Raft) persist() {
 }
 
 func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 {
+	if len(data) == 0 {
 		return
 	}
 
@@ -635,62 +636,76 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 // tester or service expects Raft to send ApplyMsg messages.
 // Make() must return quickly, so it should start goroutines
 // for any long-running work.
+// Make creates a new Raft server.
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *tester.Persister, applyCh chan raftapi.ApplyMsg) raftapi.Raft {
+
+	// 1. Initialize the Raft struct with default values.
 	rf := &Raft{}
-	// ... (initial assignments)
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
+	rf.applyCh = applyCh // Make sure to store the applyCh
 
 	rf.state = Follower
+	rf.currentTerm = 0
 	rf.votedFor = -1
+
+	// Initialize the log with a single dummy entry at index 0.
+	// This simplifies the logic for log replication.
+	rf.log = []LogEntry{{Term: 0}}
+
+	rf.commitIndex = 0
+	rf.lastApplied = 0
+
+	// Set a randomized election timeout to start.
 	rf.lastContact = time.Now()
 	rf.electionTimeout = time.Duration(150+rand.Intn(150)) * time.Millisecond
 
-	// Initialize from persisted state
+	// 2. Restore state from the persister.
+	// This will overwrite the default values if the server is restarting.
 	rf.readPersist(persister.ReadRaftState())
 
-	// If the log is empty after reading from persister (i.e., this is
-	// a new server), then create the dummy log entry.
-	if len(rf.log) == 0 {
-		rf.log = []LogEntry{{Term: 0}}
-	}
-
-	// start ticker goroutine to start elections
+	// 3. Start the background goroutines.
+	// The ticker handles election timeouts for followers/candidates.
 	go rf.ticker()
+	// The applier sends committed log entries to the service.
+	go rf.applier()
 
-	// Once an entry is committed, it must be sent to the service on the applyCh
-	// In your Make() function...
-	go func() {
-		for !rf.killed() {
-			var messagesToApply []raftapi.ApplyMsg
-
-			rf.mu.Lock()
-			// Collect all entries that need to be applied.
-			if rf.commitIndex > rf.lastApplied {
-				for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
-					msg := raftapi.ApplyMsg{
-						CommandValid: true,
-						Command:      rf.log[i].Command,
-						CommandIndex: i,
-						// CommandTerm:  rf.log[i].Term,
-					}
-					messagesToApply = append(messagesToApply, msg)
-				}
-				rf.lastApplied = rf.commitIndex
-			}
-			rf.mu.Unlock() // Release the lock!
-
-			// Now, send the collected messages without holding the lock.
-			for _, msg := range messagesToApply {
-				applyCh <- msg
-			}
-
-			// Pause briefly to avoid busy-waiting.
-			time.Sleep(10 * time.Millisecond)
-		}
-	}()
 	return rf
+}
 
+// applier is a long-running goroutine that checks for newly committed
+// log entries and sends them to the service on the applyCh.
+func (rf *Raft) applier() {
+	for !rf.killed() {
+		var messagesToApply []raftapi.ApplyMsg
+
+		rf.mu.Lock()
+		// If the commitIndex has advanced past the lastApplied index,
+		// there are new entries to apply.
+		if rf.commitIndex > rf.lastApplied {
+			// Collect all entries from lastApplied up to commitIndex.
+			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
+				msg := raftapi.ApplyMsg{
+					CommandValid: true,
+					Command:      rf.log[i].Command,
+					CommandIndex: i,
+				}
+				messagesToApply = append(messagesToApply, msg)
+			}
+			// Update lastApplied to reflect the new state.
+			rf.lastApplied = rf.commitIndex
+		}
+		rf.mu.Unlock() // IMPORTANT: Release the lock before sending on the channel.
+
+		// Send the collected messages to the service.
+		// This happens outside the lock to prevent deadlocks if the service is slow.
+		for _, msg := range messagesToApply {
+			rf.applyCh <- msg
+		}
+
+		// Pause briefly to avoid busy-waiting.
+		time.Sleep(10 * time.Millisecond)
+	}
 }

@@ -484,42 +484,38 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	// Ignore snapshots that are behind our current snapshot state.
-	if rf.killed() {
-		return
-	}
-
+	// 1. Ignore snapshots that are for old indices we've already passed.
 	if index <= rf.lastIncludedIndex {
 		return
 	}
 
-	if index > rf.getLastLogIndex() {
+	// 2. CRITICAL FIX: Ignore snapshots for indices that have not yet been committed.
+	//    The service may be ahead of the Raft layer, but Raft can only snapshot
+	//    what it knows to be stable.
+	if index > rf.commitIndex {
 		return
 	}
 
-	// The term of the last entry being included in the snapshot.
+	// 3. Get the term of the last entry to be included in the snapshot.
 	lastIncludedTerm := rf.getLogTerm(index)
 
-	// Create a new log slice. Start with a new dummy entry representing the snapshot's state.
+	// 4. Create a new, truncated log slice.
 	newLog := make([]LogEntry, 1)
 	newLog[0].Term = lastIncludedTerm
-
-	// Find any log entries that come *after* the snapshot and copy them to the new log.
 	if index < rf.getLastLogIndex() {
 		entriesToKeep := rf.log[rf.toSliceIndex(index)+1:]
 		newLog = append(newLog, entriesToKeep...)
 	}
 
-	// Replace the old, large log with the new, compacted log.
+	// 5. Update all persistent and volatile state.
 	rf.log = newLog
-
-	// Update snapshot metadata.
 	rf.lastIncludedIndex = index
 	rf.lastIncludedTerm = lastIncludedTerm
 
-	rf.persistWithSnapshot(snapshot)
+	rf.commitIndex = max(rf.commitIndex, index)
+	rf.lastApplied = max(rf.lastApplied, index)
 
-	// TODO: Notify the applier goroutine that a new snapshot is available.
+	rf.persistWithSnapshot(snapshot)
 }
 
 // example RequestVote RPC handler.

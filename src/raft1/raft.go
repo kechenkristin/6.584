@@ -315,11 +315,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = true
 }
 
-func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
-	return ok
-}
-
 func (rf *Raft) handleAppendEntriesReply(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -646,28 +641,28 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
-func (rf *Raft) ticker() {
-	// In the ticker() for a follower/candidate
-	for !rf.killed() {
-		rf.mu.Lock()
-		timeout := rf.electionTimeout
-		lastContact := rf.lastContact
-		// Only check if we are not the leader
-		if rf.state != Leader && time.Since(lastContact) > timeout {
-			// Timeout has elapsed, so we must start an election.
-			// Release the lock BEFORE calling startElection.
-			rf.mu.Unlock()
-			rf.startElection()
+// func (rf *Raft) ticker() {
+// 	// In the ticker() for a follower/candidate
+// 	for !rf.killed() {
+// 		rf.mu.Lock()
+// 		timeout := rf.electionTimeout
+// 		lastContact := rf.lastContact
+// 		// Only check if we are not the leader
+// 		if rf.state != Leader && time.Since(lastContact) > timeout {
+// 			// Timeout has elapsed, so we must start an election.
+// 			// Release the lock BEFORE calling startElection.
+// 			rf.mu.Unlock()
+// 			rf.startElection()
 
-			// Since startElection will run and then the loop continues,
-			// we need to skip the outer unlock. A 'continue' is good here.
-			continue
-		}
-		rf.mu.Unlock()
+// 			// Since startElection will run and then the loop continues,
+// 			// we need to skip the outer unlock. A 'continue' is good here.
+// 			continue
+// 		}
+// 		rf.mu.Unlock()
 
-		time.Sleep(10 * time.Millisecond) // Check every 10ms
-	}
-}
+// 		time.Sleep(10 * time.Millisecond) // Check every 10ms
+// 	}
+// }
 
 func (rf *Raft) startElection() {
 	// Transition to candidate state, increment term, vote for self,
@@ -731,7 +726,8 @@ func (rf *Raft) handleVoteReply(args *RequestVoteArgs, reply *RequestVoteReply) 
 			// send heartbeats, not wait for an election timeout.
 			// You would typically start a separate heartbeat-sending
 			// goroutine here.
-			go rf.leaderLoop() // Start the leader's work
+			// go rf.leaderLoop() // Start the leader's work
+			go rf.sendAppendEntriesToAll()
 		}
 	}
 }
@@ -761,60 +757,6 @@ func (rf *Raft) updateLeaderCommitIndex() {
 			// new commitIndex and apply the entry.
 			break // We found the highest possible new commitIndex.
 		}
-	}
-}
-
-func (rf *Raft) leaderLoop() {
-	for !rf.killed() {
-		rf.mu.Lock()
-		if rf.state != Leader {
-			rf.mu.Unlock()
-			return
-		}
-
-		// Send an RPC to each follower.
-		for i := range rf.peers {
-			if i == rf.me {
-				continue
-			}
-
-			// --- THE DECISION ---
-			// If the follower's nextIndex is at or before our last snapshot,
-			// we must send a snapshot to catch it up.
-			if rf.nextIndex[i] <= rf.lastIncludedIndex {
-				// Launch a goroutine to send the snapshot to this specific peer.
-				go rf.sendInstallSnapshot(i)
-
-			} else {
-				// Otherwise, the follower is caught up enough to receive log entries.
-				prevLogIndex := rf.nextIndex[i] - 1
-				prevLogTerm := rf.getLogTerm(prevLogIndex)
-
-				// Use the toSliceIndex helper to get the correct slice of entries.
-				sliceIndex := rf.toSliceIndex(rf.nextIndex[i])
-				entriesToSend := rf.log[sliceIndex:]
-
-				args := AppendEntriesArgs{
-					Term:         rf.currentTerm,
-					LeaderId:     rf.me,
-					PrevLogIndex: prevLogIndex,
-					PrevLogTerm:  prevLogTerm,
-					Entries:      entriesToSend,
-					LeaderCommit: rf.commitIndex,
-				}
-
-				go func(server int, args AppendEntriesArgs) {
-					reply := AppendEntriesReply{}
-					if rf.sendAppendEntries(server, &args, &reply) {
-						rf.handleAppendEntriesReply(server, &args, &reply)
-					}
-				}(i, args)
-			}
-		}
-		rf.mu.Unlock()
-
-		// Sleep for the heartbeat interval before the next round.
-		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -902,5 +844,99 @@ func (rf *Raft) applier() {
 
 		// Pause briefly to avoid busy-waiting.
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// This single function replaces leaderLoop and its helpers.
+// It is called periodically by the ticker when the server is a leader.
+func (rf *Raft) sendAppendEntriesToAll() {
+	rf.mu.Lock()
+	if rf.state != Leader {
+		rf.mu.Unlock()
+		return
+	}
+	// Read all necessary leader state under one lock to ensure consistency.
+	currentTerm := rf.currentTerm
+	rf.mu.Unlock()
+
+	// Launch a separate goroutine for each peer.
+	for i := range rf.peers {
+		if i == rf.me {
+			continue
+		}
+		go func(server int) {
+			rf.mu.Lock()
+			// Re-check that we are still the leader in the same term.
+			if rf.state != Leader || rf.currentTerm != currentTerm {
+				rf.mu.Unlock()
+				return
+			}
+
+			// Decide whether to send a snapshot or log entries.
+			if rf.nextIndex[server] <= rf.lastIncludedIndex {
+				// Follower is too far behind, must send a snapshot.
+				args := InstallSnapshotArgs{
+					Term:              rf.currentTerm,
+					LeaderId:          rf.me,
+					LastIncludedIndex: rf.lastIncludedIndex,
+					LastIncludedTerm:  rf.lastIncludedTerm,
+					Data:              rf.persister.ReadSnapshot(),
+				}
+				rf.mu.Unlock() // Unlock BEFORE blocking RPC call
+
+				reply := &InstallSnapshotReply{}
+				if rf.peers[server].Call("Raft.InstallSnapshot", &args, reply) {
+					rf.handleInstallSnapshotReply(server, &args, reply)
+				}
+				return // End of this goroutine's work
+			}
+
+			// Follower is caught up, send AppendEntries.
+			prevLogIndex := rf.nextIndex[server] - 1
+			prevLogTerm := rf.getLogTerm(prevLogIndex)
+
+			// --- CRITICAL FIX ---
+			// Add a safety check before slicing the log.
+			var entriesToSend []LogEntry
+			if rf.nextIndex[server] <= rf.getLastLogIndex() {
+				sliceIndex := rf.toSliceIndex(rf.nextIndex[server])
+				entriesToSend = rf.log[sliceIndex:]
+			}
+
+			args := AppendEntriesArgs{
+				Term:         rf.currentTerm,
+				LeaderId:     rf.me,
+				PrevLogIndex: prevLogIndex,
+				PrevLogTerm:  prevLogTerm,
+				Entries:      entriesToSend, // Will be nil if follower is caught up
+				LeaderCommit: rf.commitIndex,
+			}
+			rf.mu.Unlock()
+
+			reply := &AppendEntriesReply{}
+			if rf.peers[server].Call("Raft.AppendEntries", &args, reply) {
+				rf.handleAppendEntriesReply(server, &args, reply)
+			}
+		}(i)
+	}
+}
+
+// You will also need to update your ticker to call this new function.
+func (rf *Raft) ticker() {
+	for !rf.killed() {
+		rf.mu.Lock()
+		state := rf.state
+		timeout := rf.electionTimeout
+		lastContact := rf.lastContact
+		rf.mu.Unlock()
+
+		if state == Leader {
+			rf.sendAppendEntriesToAll()
+			time.Sleep(100 * time.Millisecond)
+		} else if time.Since(lastContact) > timeout {
+			rf.startElection()
+		} else {
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 }

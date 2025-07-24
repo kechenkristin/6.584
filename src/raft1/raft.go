@@ -641,29 +641,6 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
-// func (rf *Raft) ticker() {
-// 	// In the ticker() for a follower/candidate
-// 	for !rf.killed() {
-// 		rf.mu.Lock()
-// 		timeout := rf.electionTimeout
-// 		lastContact := rf.lastContact
-// 		// Only check if we are not the leader
-// 		if rf.state != Leader && time.Since(lastContact) > timeout {
-// 			// Timeout has elapsed, so we must start an election.
-// 			// Release the lock BEFORE calling startElection.
-// 			rf.mu.Unlock()
-// 			rf.startElection()
-
-// 			// Since startElection will run and then the loop continues,
-// 			// we need to skip the outer unlock. A 'continue' is good here.
-// 			continue
-// 		}
-// 		rf.mu.Unlock()
-
-// 		time.Sleep(10 * time.Millisecond) // Check every 10ms
-// 	}
-// }
-
 func (rf *Raft) startElection() {
 	// Transition to candidate state, increment term, vote for self,
 	// send RequestVote RPCs to all other servers.
@@ -928,14 +905,17 @@ func (rf *Raft) ticker() {
 		state := rf.state
 		timeout := rf.electionTimeout
 		lastContact := rf.lastContact
-		rf.mu.Unlock()
+		rf.mu.Unlock() // Release the lock immediately after reading state.
 
 		if state == Leader {
+			// If we are the leader, send heartbeats and then sleep.
 			rf.sendAppendEntriesToAll()
 			time.Sleep(100 * time.Millisecond)
 		} else if time.Since(lastContact) > timeout {
+			// If we are a follower/candidate and the timer has expired, start an election.
 			rf.startElection()
 		} else {
+			// Otherwise, just pause briefly before checking again.
 			time.Sleep(10 * time.Millisecond)
 		}
 	}

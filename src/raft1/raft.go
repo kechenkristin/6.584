@@ -65,7 +65,6 @@ type Raft struct {
 	electionTimeout time.Duration // timeout for elections
 	applyCh         chan raftapi.ApplyMsg
 
-	lastContact   time.Time
 	votesReceived int
 
 	// volatile state on leaders:
@@ -74,6 +73,12 @@ type Raft struct {
 
 	lastIncludedIndex int // 快照的最后一个日志条目索引 // 所有以rf.log为基础的索引都要减去这个值
 	lastIncludedTerm  int // 快照的最后一个日志条目任期
+
+	resetElectionTimerCh  chan struct{} // 重置选举定时器的通道
+	sendHeartbeatAtOnceCh chan struct{} // 立即发送心跳的通道
+	electionCh            chan struct{} // 选举定时器超时通知通道
+	heartbeatCh           chan struct{} // 心跳定时器超时通知通道
+	shutdownCh            chan struct{} // 当节点被杀死时，关闭所有通道
 }
 
 // RPC argument and reply structs
@@ -266,7 +271,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.Term > rf.currentTerm {
 		rf.becomeFollower(args.Term)
 	}
-	rf.lastContact = time.Now()
+	rf.resetElectionTimer()
+
 	reply.Term = rf.currentTerm
 
 	// Rule #2: Log Consistency Check
@@ -364,12 +370,11 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	}
 
 	if args.Term > rf.currentTerm {
-		rf.currentTerm = args.Term
-		rf.votedFor = -1
-		// Note: A single persist at the end of this function will save this.
+		rf.becomeFollower(args.Term)
 	}
-	rf.state = Follower
-	rf.lastContact = time.Now()
+
+	// reset the timer
+	rf.resetElectionTimer()
 
 	// If our existing log is already ahead of this snapshot, ignore it.
 	if args.LastIncludedIndex <= rf.commitIndex {
@@ -479,6 +484,10 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	if rf.killed() {
+		return
+	}
+
 	// 1. Ignore snapshots that are for old indices we've already passed.
 	if index <= rf.lastIncludedIndex {
 		return
@@ -487,7 +496,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// 2. CRITICAL FIX: Ignore snapshots for indices that have not yet been committed.
 	//    The service may be ahead of the Raft layer, but Raft can only snapshot
 	//    what it knows to be stable.
-	if index > rf.commitIndex {
+	if index > rf.getLastLogIndex() {
 		return
 	}
 
@@ -511,6 +520,11 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.lastApplied = max(rf.lastApplied, index)
 
 	rf.persistWithSnapshot(snapshot)
+
+	// if leader, send hearbeats
+	if rf.state == Leader {
+		rf.sendHeartbeatAtOnce()
+	}
 }
 
 // example RequestVote RPC handler.
@@ -545,7 +559,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VoteGranted = true
 		rf.votedFor = args.CandidateId
 		rf.persist() // Persist the vote
-		rf.lastContact = time.Now()
+		rf.resetElectionTimer()
 	} else {
 		reply.VoteGranted = false
 	}
@@ -634,6 +648,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
+	close(rf.shutdownCh)
 }
 
 func (rf *Raft) killed() bool {
@@ -650,7 +665,7 @@ func (rf *Raft) startElection() {
 
 	// Increment term and change state to Candidate
 	rf.becomeCandidate()
-	rf.lastContact = time.Now()
+	rf.resetElectionTimer()
 	rf.votesReceived = 1 // We vote for ourselves
 
 	// Reset election timeout
@@ -769,7 +784,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.lastApplied = 0
 
 	// Set a randomized election timeout to start.
-	rf.lastContact = time.Now()
+	rf.resetElectionTimer()
 	rf.electionTimeout = time.Duration(150+rand.Intn(150)) * time.Millisecond
 
 	// 2. Restore state from the persister.
@@ -780,8 +795,16 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.lastIncludedIndex = 0 // Initialize snapshot-related fields
 	rf.lastIncludedTerm = 0
 
+	rf.resetElectionTimerCh = make(chan struct{}, 1)
+	rf.sendHeartbeatAtOnceCh = make(chan struct{}, 1)
+	rf.electionCh = make(chan struct{}, 1)
+	rf.heartbeatCh = make(chan struct{}, 1)
+	rf.shutdownCh = make(chan struct{}, 1)
+
 	// 3. Start the background goroutines.
 	// The ticker handles election timeouts for followers/candidates.
+	go rf.electionTimer()
+	go rf.heartbeatTimer()
 	go rf.ticker()
 	// The applier sends committed log entries to the service.
 	go rf.applier()
@@ -877,6 +900,7 @@ func (rf *Raft) sendAppendEntriesToAll() {
 			var entriesToSend []LogEntry
 			if rf.nextIndex[server] <= rf.getLastLogIndex() {
 				sliceIndex := rf.toSliceIndex(rf.nextIndex[server])
+				// TODO
 				entriesToSend = rf.log[sliceIndex:]
 			}
 
@@ -899,24 +923,139 @@ func (rf *Raft) sendAppendEntriesToAll() {
 }
 
 // You will also need to update your ticker to call this new function.
+// func (rf *Raft) ticker() {
+// 	for !rf.killed() {
+// 		rf.mu.Lock()
+// 		state := rf.state
+// 		timeout := rf.electionTimeout
+// 		// lastContact := rf.lastContact
+// 		rf.resetElectionTimer()
+// 		rf.mu.Unlock() // Release the lock immediately after reading state.
+
+// 		if state == Leader {
+// 			// If we are the leader, send heartbeats and then sleep.
+// 			// TODO: check here
+// 			// rf.sendAppendEntriesToAll()
+// 			go rf.sendAppendEntriesToAll()
+// 			// Sleep for a short duration to avoid busy-waiting.
+// 			time.Sleep(100 * time.Millisecond)
+// 		} else if time.Since(lastContact) > timeout {
+// 			// If we are a follower/candidate and the timer has expired, start an election.
+// 			rf.startElection()
+// 		} else {
+// 			// Otherwise, just pause briefly before checking again.
+// 			time.Sleep(10 * time.Millisecond)
+// 		}
+// 	}
+// }
+
 func (rf *Raft) ticker() {
 	for !rf.killed() {
-		rf.mu.Lock()
-		state := rf.state
-		timeout := rf.electionTimeout
-		lastContact := rf.lastContact
-		rf.mu.Unlock() // Release the lock immediately after reading state.
 
-		if state == Leader {
-			// If we are the leader, send heartbeats and then sleep.
-			rf.sendAppendEntriesToAll()
-			time.Sleep(100 * time.Millisecond)
-		} else if time.Since(lastContact) > timeout {
-			// If we are a follower/candidate and the timer has expired, start an election.
-			rf.startElection()
-		} else {
-			// Otherwise, just pause briefly before checking again.
-			time.Sleep(10 * time.Millisecond)
+		// Your code here (3A)
+		// Check if a leader election should be started.
+		select {
+		case <-rf.electionCh:
+			rf.mu.Lock()
+			isLeader := rf.state == Leader
+			rf.mu.Unlock()
+			if !isLeader {
+				go rf.startElection()
+			}
+		case <-rf.heartbeatCh:
+			rf.mu.Lock()
+			isLeader := rf.state == Leader
+			rf.mu.Unlock()
+			if isLeader {
+				go rf.sendAppendEntriesToAll()
+			}
+		case <-rf.shutdownCh:
+			return
 		}
 	}
+}
+
+func (rf *Raft) resetElectionTimer() {
+	select {
+	case rf.resetElectionTimerCh <- struct{}{}:
+	default:
+	}
+}
+func (rf *Raft) sendHeartbeatAtOnce() {
+	select {
+	case rf.sendHeartbeatAtOnceCh <- struct{}{}:
+	default:
+	}
+}
+
+func (rf *Raft) electionTimer() {
+	timer := time.NewTimer(RandomElectionTimeout())
+	defer timer.Stop()
+
+	for !rf.killed() {
+		select {
+		case <-timer.C:
+			rf.mu.Lock()
+			isLeader := rf.state == Leader
+			rf.mu.Unlock()
+			if !isLeader {
+				select {
+				case rf.electionCh <- struct{}{}:
+				default:
+				}
+			}
+			timer.Reset(RandomElectionTimeout())
+		case <-rf.resetElectionTimerCh:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			timer.Reset(RandomElectionTimeout())
+		case <-rf.shutdownCh:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		}
+	}
+}
+
+func RandomElectionTimeout() time.Duration {
+	// 测试器要求你的 Raft 在旧 leader 失败后的 5 秒内选出一个新的 leader。
+	return time.Duration(250+rand.Intn(400)) * time.Millisecond
+}
+
+func (rf *Raft) heartbeatTimer() {
+	timer := time.NewTimer(StableHeartbeatTimeout())
+	defer timer.Stop()
+
+	for !rf.killed() {
+		select {
+		case <-timer.C:
+			rf.mu.Lock()
+			isLeader := rf.state == Leader
+			rf.mu.Unlock()
+			if isLeader {
+				select {
+				case rf.heartbeatCh <- struct{}{}:
+				default:
+				}
+			}
+			timer.Reset(StableHeartbeatTimeout())
+		case <-rf.sendHeartbeatAtOnceCh:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			timer.Reset(0) // 立即发送心跳
+		case <-rf.shutdownCh:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		}
+	}
+}
+
+func StableHeartbeatTimeout() time.Duration {
+	// 测试器要求 leader 每秒发送检测信号 RPC 不超过 10 次。
+	return time.Duration(100 * time.Millisecond)
 }
